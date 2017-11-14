@@ -1,23 +1,23 @@
+__author__ = 'yuxiang'
+
+import datasets
+import datasets.nthu
 import os
 import PIL
+import datasets.imdb
 import numpy as np
 import scipy.sparse
+from utils.cython_bbox import bbox_overlaps
+from utils.boxes_grid import get_boxes_grid
 import subprocess
 import cPickle
+from fast_rcnn.config import cfg
 import math
-import glob
+from rpn_msr.generate_anchors import generate_anchors
 
-from .imdb import imdb
-from .imdb import ROOT_DIR
-
-# TODO: make fast_rcnn irrelevant
-# >>>> obsolete, because it depends on sth outside of this project
-from ..fast_rcnn.config import cfg
-# <<<< obsolete
-
-class nthu(imdb):
+class nthu(datasets.imdb):
     def __init__(self, image_set, nthu_path=None):
-        imdb.__init__(self, 'nthu_' + image_set)
+        datasets.imdb.__init__(self, 'nthu_' + image_set)
         self._image_set = image_set
         self._nthu_path = self._get_default_path() if nthu_path is None \
                             else nthu_path
@@ -93,7 +93,7 @@ class nthu(imdb):
         """
         Return the default path where nthu is expected to be installed.
         """
-        return os.path.join(ROOT_DIR, 'data', 'NTHU')
+        return os.path.join(datasets.ROOT_DIR, 'data', 'NTHU')
 
 
     def gt_roidb(self):
@@ -247,6 +247,6 @@ class nthu(imdb):
 
 
 if __name__ == '__main__':
-    d = nthu('71')
+    d = datasets.nthu('71')
     res = d.roidb
     from IPython import embed; embed()

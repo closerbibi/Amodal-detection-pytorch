@@ -42,7 +42,6 @@ def proposal_target_layer(rpn_rois, gt_boxes, gt_ishard, dontcare_areas, _num_cl
     bbox_inside_weights: (1 x H x W x A, Kx4) 0, 1 masks for the computing loss
     bbox_outside_weights: (1 x H x W x A, Kx4) 0, 1 masks for the computing loss
     """
-
     # Proposal ROIs (0, x1, y1, x2, y2) coming from RPN
     # (i.e., rpn.proposal_layer.ProposalLayer), or any other source
     all_rois = rpn_rois
@@ -62,8 +61,11 @@ def proposal_target_layer(rpn_rois, gt_boxes, gt_ishard, dontcare_areas, _num_cl
     """
     jittered_gt_boxes = _jitter_gt_boxes(gt_easyboxes)
     zeros = np.zeros((gt_easyboxes.shape[0] * 2, 1), dtype=gt_easyboxes.dtype)
-    all_rois = np.vstack((all_rois, \
+    try:
+        all_rois = np.vstack((all_rois, \
                           np.hstack((zeros, np.vstack((gt_easyboxes[:, :-1], jittered_gt_boxes[:, :-1]))))))
+    except:
+        pdb.set_trace()
 
     # Sanity check: single batch only
     assert np.all(all_rois[:, 0] == 0), \
@@ -183,7 +185,6 @@ def _sample_rois(all_rois, gt_boxes, gt_ishard, dontcare_areas, fg_rois_per_imag
 
     bbox_target_data = _compute_targets(
         rois[:, 1:5], gt_boxes[gt_assignment[keep_inds], :4], labels)
-
     # bbox_target_data (1 x H x W x A, 5)
     # bbox_targets <- (1 x H x W x A, K x 4)
     # bbox_inside_weights <- (1 x H x W x A, K x 4)

@@ -1,23 +1,23 @@
+__author__ = 'yuxiang'
+
+import datasets
+import datasets.nissan
 import os
 import PIL
+import datasets.imdb
 import numpy as np
 import scipy.sparse
+from utils.cython_bbox import bbox_overlaps
+from utils.boxes_grid import get_boxes_grid
 import subprocess
 import cPickle
+from fast_rcnn.config import cfg
 import math
-import glob
+from rpn_msr.generate_anchors import generate_anchors
 
-from .imdb import imdb
-from .imdb import ROOT_DIR
-
-# TODO: make fast_rcnn irrelevant
-# >>>> obsolete, because it depends on sth outside of this project
-from ..fast_rcnn.config import cfg
-# <<<< obsolete
-
-class nissan(imdb):
+class nissan(datasets.imdb):
     def __init__(self, image_set, nissan_path=None):
-        imdb.__init__(self, 'nissan_' + image_set)
+        datasets.imdb.__init__(self, 'nissan_' + image_set)
         self._image_set = image_set
         self._nissan_path = self._get_default_path() if nissan_path is None \
                             else nissan_path
@@ -93,7 +93,7 @@ class nissan(imdb):
         """
         Return the default path where NISSAN is expected to be installed.
         """
-        return os.path.join(ROOT_DIR, 'data', 'NISSAN')
+        return os.path.join(datasets.ROOT_DIR, 'data', 'NISSAN')
 
 
     def gt_roidb(self):
@@ -247,6 +247,6 @@ class nissan(imdb):
 
 
 if __name__ == '__main__':
-    d = nissan('2015-10-21-16-25-12')
+    d = datasets.nissan('2015-10-21-16-25-12')
     res = d.roidb
     from IPython import embed; embed()

@@ -28,6 +28,27 @@ def parse_rec(filename):
 
     return objects
 
+def parse_rec_txt(filename):
+    """ Parse a txt file """
+    f = open(filename,'r').read().split('\n')[:-1]
+    objects = []
+    for obj in f:
+        obj_struct = {}
+        obj_tmp = obj.split(' - ')
+        X_min = int(obj_tmp[0].split(',')[0].split('(')[1])
+        Y_min = int(obj_tmp[0].split(',')[1].split(' ')[1].split(')')[0])
+        X_max = int(obj_tmp[1].split(',')[0].split('(')[1])
+        Y_max = int(obj_tmp[1].split(',')[1].split(' ')[1].split(')')[0])
+        name = obj_tmp[2].split('(')[1].split(')')[0]
+        obj_struct['name'] = name
+        obj_struct['pose'] = ''
+        obj_struct['truncated'] = 0
+        obj_struct['difficult'] = 0
+        obj_struct['bbox'] = [X_min,Y_min,X_max,Y_max]
+        objects.append(obj_struct)
+
+    return objects
+
 def voc_ap(rec, prec, use_07_metric=False):
     """ ap = voc_ap(rec, prec, [use_07_metric])
     Compute VOC AP given precision and recall.
@@ -106,7 +127,8 @@ def voc_eval(detpath,
         # load annots
         recs = {}
         for i, imagename in enumerate(imagenames):
-            recs[imagename] = parse_rec(annopath.format(imagename))
+            #recs[imagename] = parse_rec(annopath.format(imagename))
+            recs[imagename] = parse_rec_txt(annopath.format(imagename))
             if i % 100 == 0:
                 print 'Reading annotation for {:d}/{:d}'.format(
                     i + 1, len(imagenames))
@@ -123,6 +145,7 @@ def voc_eval(detpath,
     class_recs = {}
     npos = 0
     for imagename in imagenames:
+        #pdb.set_trace()
         R = [obj for obj in recs[imagename] if obj['name'] == classname]
         bbox = np.array([x['bbox'] for x in R])
         difficult = np.array([x['difficult'] for x in R]).astype(np.bool)
@@ -198,8 +221,8 @@ def voc_eval(detpath,
         prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
         ap = voc_ap(rec, prec, use_07_metric)
     else:
-         rec = -1
-         prec = -1
-         ap = -1
+         rec = np.array([0.0000])#-1 #gabriel
+         prec = np.array([0.0000])#-1
+         ap = 0
 
     return rec, prec, ap

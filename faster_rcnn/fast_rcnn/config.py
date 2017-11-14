@@ -21,6 +21,7 @@ import os.path as osp
 import numpy as np
 from time import strftime, localtime
 from easydict import EasyDict as edict
+import pdb
 
 __C = edict()
 # Consumers can get config by:
@@ -34,7 +35,7 @@ cfg = __C
 # region proposal network (RPN) or not
 __C.IS_RPN = True
 __C.ANCHOR_SCALES = [8, 16, 32]
-__C.NCLASSES = 21
+__C.NCLASSES = 6
 
 # multiscale training and testing
 __C.IS_MULTISCALE = False
@@ -78,7 +79,10 @@ __C.TRAIN.SCALES = (600,)
 __C.TRAIN.MAX_SIZE = 1000
 
 # Images to use per minibatch
-__C.TRAIN.IMS_PER_BATCH = 2
+__C.TRAIN.IMS_PER_BATCH = 1
+
+# Train bounding-box regressors 3d
+__C.TRAIN.BBOX_REG_3d = True
 
 # Minibatch size (number of regions of interest [ROIs])
 __C.TRAIN.BATCH_SIZE = 128
@@ -225,6 +229,8 @@ __C.DEDUP_BOXES = 1. / 16.
 # they were trained with
 __C.PIXEL_MEANS = np.array([[[102.9801, 115.9465, 122.7717]]])
 
+__C.PIXEL_MEANS_D = 72.8123
+
 # For reproducibility
 __C.RNG_SEED = 3
 
@@ -320,7 +326,7 @@ def cfg_from_file(filename):
     import yaml
     with open(filename, 'r') as f:
         yaml_cfg = edict(yaml.load(f))
-
+        #pdb.set_trace()
     _merge_a_into_b(yaml_cfg, __C)
 
 

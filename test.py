@@ -1,163 +1,342 @@
-import os
-import torch
-import cv2
-import cPickle
-import numpy as np
-
-from faster_rcnn import network
-from faster_rcnn.faster_rcnn import FasterRCNN, RPN
-from faster_rcnn.utils.timer import Timer
-from faster_rcnn.fast_rcnn.nms_wrapper import nms
-
-from faster_rcnn.fast_rcnn.bbox_transform import bbox_transform_inv, clip_boxes
-from faster_rcnn.datasets.factory import get_imdb
+#from config import cfg
 from faster_rcnn.fast_rcnn.config import cfg, cfg_from_file, get_output_dir
+import numpy as np
+import cv2
+import scipy.io as sio
+#import utils.help_functions as mf
+import heapq
+from timer import Timer
+import argparse
+from faster_rcnn.faster_rcnn import FasterRCNN
+from faster_rcnn.datasets.factory import get_imdb
+from faster_rcnn import network
+import os
+import cPickle
+import pdb
+from faster_rcnn.my_faster_rcnn import Network
+#python test.py --inputfile inria_test --iternum 100000 --save HHA
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--inputfile', type=str,
+        help='input file')
+    parser.add_argument('--iternum', type=str, 
+        help='number or iter')
+    parser.add_argument('--save', type=str, 
+        help='save path')
+    return parser
+parser = parse_args()
+args = parser.parse_args()
+
+imdb_name = args.inputfile
+iter_choose = args.iternum
+#trained_model = 'models/%s/faster_rcnn_%s.h5'%(args.save, iter_choose)
+trained_model = 'models/rgbd_3det_iter_40000.h5'
+def _get_image_blob(im):
+    im_orig = im.astype(np.float32, copy=True)
+    im_orig -= cfg.PIXEL_MEANS
+    blob = np.zeros((1, im.shape[0], im.shape[1], 3), dtype=np.float32)
+    blob[0, 0:im.shape[0], 0:im.shape[1], :] = im_orig
+    # Move channels (axis 3) to axis 1
+    # Axis order will become: (batch elem, channel, height, width)
+    channel_swap = (0, 3, 1, 2)
+    blob = blob.transpose(channel_swap)
+    return blob
 
 
-# hyper-parameters
-# ------------
-imdb_name = 'voc_2007_test'
-cfg_file = 'experiments/cfgs/faster_rcnn_end2end.yml'
-# trained_model = '/media/longc/Data/models/VGGnet_fast_rcnn_iter_70000.h5'
-trained_model = 'models/saved_model3/faster_rcnn_90000.h5'
+def _get_dmap_blob(dmap):
+    blob = np.zeros((1, 3, dmap.shape[0], dmap.shape[1]), dtype=np.float32)
+    dmap -= cfg.PIXEL_MEANS_D
+    blob[0, 0, :, :] = dmap
+    blob[0, 1, :, :] = dmap
+    blob[0, 2, :, :] = dmap
 
-rand_seed = 1024
+    return blob
 
-save_name = 'faster_rcnn_100000'
-max_per_image = 300
-thresh = 0.05
-vis = False
+# def _get_dmap_blob(hha):
+#     # hha
+#     hha_orig = hha.astype(np.float32, copy=True)
+#     hha_orig -= cfg.PIXEL_MEANS_hha
+#     blob = np.zeros((1, hha.shape[0], hha.shape[1], 3), dtype=np.float32)
+#     blob[0, 0:hha.shape[0], 0:hha.shape[1], :] = hha_orig
+#     # Move channels (axis 3) to axis 1
+#     # Axis order will become: (batch elem, channel, height, width)
+#     channel_swap = (0, 3, 1, 2)
+#     blob = blob.transpose(channel_swap)
+#     return blob
 
-# ------------
-
-if rand_seed is not None:
-    np.random.seed(rand_seed)
-
-if rand_seed is not None:
-    np.random.seed(rand_seed)
-
-# load config
-cfg_from_file(cfg_file)
-
-
-def vis_detections(im, class_name, dets, thresh=0.8):
-    """Visual debugging of detections."""
-    for i in range(np.minimum(10, dets.shape[0])):
-        bbox = tuple(int(np.round(x)) for x in dets[i, :4])
-        score = dets[i, -1]
-        if score > thresh:
-            cv2.rectangle(im, bbox[0:2], bbox[2:4], (0, 204, 0), 2)
-            cv2.putText(im, '%s: %.3f' % (class_name, score), (bbox[0], bbox[1] + 15), cv2.FONT_HERSHEY_PLAIN,
-                        1.0, (0, 0, 255), thickness=1)
-    return im
-
-
-def im_detect(net, image):
-    """Detect object classes in an image given object proposals.
-    Returns:
-        scores (ndarray): R x K array of object class scores (K includes
-            background as object category 0)
-        boxes (ndarray): R x (4*K) array of predicted bounding boxes
+def _get_rois_blob(bbox):
     """
+       bbox: [xmin, ymin, xmax, ymax] N x 4
 
-    im_data, im_scales = net.get_image_blob(image)
-    im_info = np.array(
-        [[im_data.shape[1], im_data.shape[2], im_scales[0]]],
-        dtype=np.float32)
+       return : [level, xmin, ymin, xmax, ymax] N x 5
+    """
+    levels = np.zeros((bbox.shape[0], 1), dtype=np.int)
+    rois_blob = np.hstack((levels, bbox))
 
-    cls_prob, bbox_pred, rois = net(im_data, im_info)
+    return rois_blob.astype(np.float32, copy=False)
+
+def _bbox_pred(boxes, box_deltas):
+    """Transform the set of class-agnostic boxes into class-specific boxes
+    by applying the predicted offsets (box_deltas)
+    """
+    if boxes.shape[0] == 0:
+        return np.zeros((0, box_deltas.shape[1]))
+
+    boxes = boxes.astype(np.float, copy=False)
+    widths = boxes[:, 2] - boxes[:, 0] + cfg.EPS
+    heights = boxes[:, 3] - boxes[:, 1] + cfg.EPS
+    ctr_x = boxes[:, 0] + 0.5 * widths
+    ctr_y = boxes[:, 1] + 0.5 * heights
+
+    dx = box_deltas[:, 0::4]
+    dy = box_deltas[:, 1::4]
+    dw = box_deltas[:, 2::4]
+    dh = box_deltas[:, 3::4]
+
+    pred_ctr_x = dx * widths[:, np.newaxis] + ctr_x[:, np.newaxis]
+    pred_ctr_y = dy * heights[:, np.newaxis] + ctr_y[:, np.newaxis]
+    pred_w = np.exp(dw) * widths[:, np.newaxis]
+    pred_h = np.exp(dh) * heights[:, np.newaxis]
+
+    pred_boxes = np.zeros(box_deltas.shape)
+    # x1
+    pred_boxes[:, 0::4] = pred_ctr_x - 0.5 * pred_w
+    # y1
+    pred_boxes[:, 1::4] = pred_ctr_y - 0.5 * pred_h
+    # x2
+    pred_boxes[:, 2::4] = pred_ctr_x + 0.5 * pred_w
+    # y2
+    pred_boxes[:, 3::4] = pred_ctr_y + 0.5 * pred_h
+
+    return pred_boxes
+
+
+def _bbox_pred_3d(bbox_3d, box_deltas_3d):
+    """
+    Args:
+        bbox_3d: N x (n_cls * 7)
+        box_deltas_3d: N x (n_cls * 7)
+
+    Returns:
+         pred_box_3d: N x (n_cls * 7)
+    """
+    if bbox_3d.shape[0] == 0:
+        return np.zeros((0, box_deltas_3d.shape[1]))
+
+    bbox_3d = bbox_3d.astype(np.float, copy=False)
+
+    # N x n_cls
+    cx = bbox_3d[:, 0::7]
+    cy = bbox_3d[:, 1::7]
+    cz = bbox_3d[:, 2::7]
+    l = bbox_3d[:, 3::7]
+    w = bbox_3d[:, 4::7]
+    h = bbox_3d[:, 5::7]
+
+    # offsets (N x n_cls)
+    dx = box_deltas_3d[:, 0::7]
+    dy = box_deltas_3d[:, 1::7]
+    dz = box_deltas_3d[:, 2::7]
+    dl = box_deltas_3d[:, 3::7]
+    dw = box_deltas_3d[:, 4::7]
+    dh = box_deltas_3d[:, 5::7]
+    dt = box_deltas_3d[:, 6::7]
+
+    # prediction
+    pred_ctr_x = np.multiply(dx, l) + cx
+    pred_ctr_y = np.multiply(dy, h) + cy
+    pred_ctr_z = np.multiply(dz, w) + cz
+    pred_l = np.multiply(np.exp(dl), l)
+    pred_w = np.multiply(np.exp(dw), w)
+    pred_h = np.multiply(np.exp(dh), h)
+    pred_t = dt
+
+    pred_boxes_3d = np.zeros(box_deltas_3d.shape)
+    pred_boxes_3d[:, 0::7] = pred_ctr_x
+    pred_boxes_3d[:, 1::7] = pred_ctr_y
+    pred_boxes_3d[:, 2::7] = pred_ctr_z
+    pred_boxes_3d[:, 3::7] = pred_l
+    pred_boxes_3d[:, 4::7] = pred_w
+    pred_boxes_3d[:, 5::7] = pred_h
+    pred_boxes_3d[:, 6::7] = pred_t
+    return pred_boxes_3d
+
+
+#def im_detect_3d(net, im, dmap, boxes, boxes_3d, rois_context):
+def im_detect_3d(net, im, dmap, boxes, boxes_3d):
+    """  predict bbox and class scores
+        bbox: N x 4 [xmin, ymin, xmax, ymax]
+        bbox_3d : N x (n_cls * 7)
+        return: scores: N x n_cls
+                pred_boxes: N x (n_cls*4) [xmin, ymin, xmax, ymax]
+                pred_boxes_3d: N x (n_cls*7)
+    """
+    # construct blobs
+    blobs = {'img': None, 'dmap': None, 'rois': None}
+    blobs['img'] = _get_image_blob(im)
+    blobs['dmap'] = _get_dmap_blob(dmap)
+    blobs['rois'] = _get_rois_blob(boxes)
+    #blobs['rois_context'] = _get_rois_blob(rois_context)
+    # When mapping from image ROIs to feature map ROIs, there's some aliasing
+    # (some distinct image ROIs get mapped to the same feature ROI).
+    # Here, we identify duplicate feature ROIs, so we only compute features
+    # on the unique subset.
+    if cfg.DEDUP_BOXES > 0:
+        v = np.array([1, 1e3, 1e6, 1e9, 1e12])
+        hashes = np.round(blobs['rois'] * cfg.DEDUP_BOXES).dot(v)
+        _, index, inv_index = np.unique(hashes, return_index=True,
+                                        return_inverse=True)
+        blobs['rois'] = blobs['rois'][index, :]
+        boxes = boxes[index, :]
+        boxes_3d = boxes_3d[index, :]
+        #blobs['rois_context'] = blobs['rois_context'][index, :]
+    
+    # reshape network inputs
+    #net.blobs['img'].reshape(*(blobs['img'].shape))
+    #net.blobs['dmap'].reshape(*(blobs['dmap'].shape))
+    #net.blobs['rois'].reshape(*(blobs['rois'].shape))
+    #net.blobs['rois_context'].reshape(*(blobs['rois_context'].shape))
+
+    # forward pass for predictions
+    #blobs_out = net(img=blobs['img'].astype(np.float32, copy=False),
+    #                dmap=blobs['dmap'].astype(np.float32, copy=False),
+    #                rois=blobs['rois'].astype(np.float32, copy=False))#,
+    #                rois_context=blobs['rois_context'].astype(np.float32, copy=False))
+    cls_prob, bbox_pred_3d, rois = net(blobs['img'].astype(np.float32, copy=False),
+                    blobs['dmap'].astype(np.float32, copy=False),
+                    blobs['rois'].astype(np.float32, copy=False))
+    # use softmax estimated probabilities
     scores = cls_prob.data.cpu().numpy()
-    boxes = rois.data.cpu().numpy()[:, 1:5] / im_info[0][2]
 
-    if cfg.TEST.BBOX_REG:
-        # Apply bounding-box regression deltas
-        box_deltas = bbox_pred.data.cpu().numpy()
-        pred_boxes = bbox_transform_inv(boxes, box_deltas)
-        pred_boxes = clip_boxes(pred_boxes, image.shape)
-    else:
-        # Simply repeat the boxes, once for each class
-        pred_boxes = np.tile(boxes, (1, scores.shape[1]))
+    """ Apply bounding-box regression deltas """
+    # 3d boxes
+    box_deltas_3d = bbox_pred_3d.data.cpu().numpy()
+    pred_boxes_3d = _bbox_pred_3d(boxes_3d, box_deltas_3d)
+    #  2d boxes
+    box_deltas = np.zeros((box_deltas_3d.shape[0], box_deltas_3d.shape[1]/7 *4))
+    pred_boxes = _bbox_pred(boxes, box_deltas)
+    
+    if cfg.DEDUP_BOXES > 0:
+        # Map scores and predictions back to the original set of boxes
+        scores = scores[inv_index, :]
+        pred_boxes = pred_boxes[inv_index, :]
+        pred_boxes_3d = pred_boxes_3d[inv_index, :]
+    
+    return scores, pred_boxes, pred_boxes_3d
 
-    return scores, pred_boxes
 
-
-def test_net(name, net, imdb, max_per_image=300, thresh=0.05, vis=False):
-    """Test a Fast R-CNN network on an image database."""
-    num_images = len(imdb.image_index)
+def test_net(net, roidb, setType):
+    """Test a network on an image database."""
+    num_images = len(roidb)
+    #num_classes = len(cfg.classes)
+    num_classes = 20
+    # heuristic: keep an average of 40 detections per class per images prior
+    # to NMS
+    max_per_set = 40 * num_images
+    # heuristic: keep at most 100 detection per class per image prior to NMS
+    max_per_image = 100
+    # detection thresold for each class (this is adaptively set based on the
+    # max_per_set constraint)
+    thresh = -np.inf * np.ones(num_classes)
+    # top_scores will hold one minheap of scores per class (used to enforce
+    # the max_per_set constraint)
+    top_scores = [[] for _ in xrange(num_classes)]
     # all detections are collected into:
     #    all_boxes[cls][image] = N x 5 array of detections in
     #    (x1, y1, x2, y2, score)
     all_boxes = [[[] for _ in xrange(num_images)]
-                 for _ in xrange(imdb.num_classes)]
-
-    output_dir = get_output_dir(imdb, name)
-
+                 for _ in xrange(num_classes)]
     # timers
-    _t = {'im_detect': Timer(), 'misc': Timer()}
-    det_file = os.path.join(output_dir, 'detections.pkl')
+    _t = {'im_detect' : Timer(), 'misc' : Timer()}
 
-    for i in range(num_images):
-
-        im = cv2.imread(imdb.image_path_at(i))
+    for i in xrange(num_images):
+        # load image
+        path = roidb[i]['image']
+        name = path.split('/')[-1]
+        print 'now at %s'%name
+        im = cv2.imread(roidb[i]['image'])
+        # load dmap
+        tmp = sio.loadmat(roidb[i]['dmap'])
+        dmap = tmp['dmap_f']
         _t['im_detect'].tic()
-        scores, boxes = im_detect(net, im)
-        detect_time = _t['im_detect'].toc(average=False)
-
+        scores, boxes, boxes_3d = \
+            im_detect_3d(net, im, dmap, roidb[i]['boxes'], roidb[i]['boxes_3d'])
+        _t['im_detect'].toc()
         _t['misc'].tic()
-        if vis:
-            # im2show = np.copy(im[:, :, (2, 1, 0)])
-            im2show = np.copy(im)
-
-        # skip j = 0, because it's the background class
-        for j in xrange(1, imdb.num_classes):
-            inds = np.where(scores[:, j] > thresh)[0]
+        # estimate threshold for each class
+        for j in xrange(1, num_classes):
+            inds = np.where((scores[:, j] > thresh[j]))[0]
             cls_scores = scores[inds, j]
-            cls_boxes = boxes[inds, j * 4:(j + 1) * 4]
-            cls_dets = np.hstack((cls_boxes, cls_scores[:, np.newaxis])) \
-                .astype(np.float32, copy=False)
-            keep = nms(cls_dets, cfg.TEST.NMS)
-            cls_dets = cls_dets[keep, :]
-            if vis:
-                im2show = vis_detections(im2show, imdb.classes[j], cls_dets)
-            all_boxes[j][i] = cls_dets
+            cls_boxes = boxes[inds, j*4:(j+1)*4]
+            cls_boxes_3d = boxes_3d[inds, j*7:(j+1)*7]
 
-        # Limit to max_per_image detections *over all classes*
-        if max_per_image > 0:
-            image_scores = np.hstack([all_boxes[j][i][:, -1]
-                                      for j in xrange(1, imdb.num_classes)])
-            if len(image_scores) > max_per_image:
-                image_thresh = np.sort(image_scores)[-max_per_image]
-                for j in xrange(1, imdb.num_classes):
-                    keep = np.where(all_boxes[j][i][:, -1] >= image_thresh)[0]
-                    all_boxes[j][i] = all_boxes[j][i][keep, :]
-        nms_time = _t['misc'].toc(average=False)
+            top_inds = np.argsort(-cls_scores)[:max_per_image]
+            # select top 'max_per_image'-th high scored boxes
+            cls_scores = cls_scores[top_inds]
+            cls_boxes = cls_boxes[top_inds, :]
+            cls_boxes_3d = cls_boxes_3d[top_inds, :]
+
+            # push new scores onto the minheap
+            for val in cls_scores:
+                heapq.heappush(top_scores[j], val)
+            # if we've collected more than the max number of detection,
+            # then pop items off the minheap and update the class threshold
+            if len(top_scores[j]) > max_per_set:
+                while len(top_scores[j]) > max_per_set:
+                    heapq.heappop(top_scores[j])
+                thresh[j] = top_scores[j][0]
+
+            all_boxes[j][i] = \
+                    np.hstack((cls_boxes, cls_scores[:, np.newaxis], cls_boxes_3d)).astype(np.float32, copy=False)
+
+        _t['misc'].toc()
 
         print 'im_detect: {:d}/{:d} {:.3f}s {:.3f}s' \
-            .format(i + 1, num_images, detect_time, nms_time)
+              .format(i + 1, num_images, _t['im_detect'].average_time,
+                      _t['misc'].average_time)
 
-        if vis:
-            cv2.imshow('test', im2show)
-            cv2.waitKey(1)
+    for j in xrange(1, num_classes):
+        print "thresh[j] = {}".format(thresh[j])
+        for i in xrange(num_images):
+            inds = np.where(all_boxes[j][i][:, 4] > thresh[j])[0]
+            all_boxes[j][i] = all_boxes[j][i][inds, :]
 
-    with open(det_file, 'wb') as f:
-        cPickle.dump(all_boxes, f, cPickle.HIGHEST_PROTOCOL)
-
-    print 'Evaluating detections'
-    imdb.evaluate_detections(all_boxes, output_dir)
-
+    # save
+    obj_arr = np.zeros((num_classes, num_images), dtype=np.object)
+    for i in xrange(num_classes):
+        for j in xrange(num_images):
+            obj_arr[i][j] = all_boxes[i][j]
+    save_path = 'output/%s/%s'%(args.save, setType)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    #sio.savemat(save_path + '/all_boxes_cells_%s_%s.mat'%(setType, args.iternum), {'all_boxes': obj_arr})
+    sio.savemat(save_path + '/all_boxes_cells_gt.mat', {'all_boxes': obj_arr})
 
 if __name__ == '__main__':
     # load data
     imdb = get_imdb(imdb_name)
-    imdb.competition_mode(on=True)
-
+    #imdb.competition_mode(on=True)
+    #pdb.set_trace()
     # load net
-    net = FasterRCNN(classes=imdb.classes, debug=False)
-    network.load_net(trained_model, net)
+    #net = FasterRCNN(classes=imdb.classes, debug=False)
+    net = Network(classes=imdb.classes, debug=False)
+    network.load_caffe_net(trained_model, net)
+    #network.load_net(trained_model, net)
     print('load model successfully!')
 
     net.cuda()
     net.eval()
 
+    setType = imdb_name.split('_')[-1]
+    cache_file = os.path.join('./', 'roidb_' + setType + '_19.pkl')
+    if os.path.exists(cache_file):
+        with open(cache_file, 'rb') as fid:
+            roidb = cPickle.load(fid)
+        print 'raw data is loaded from {}'.format(cache_file)
     # evaluation
-    test_net(save_name, net, imdb, max_per_image, thresh=thresh, vis=vis)
+    #test_net(save_name, net, imdb, max_per_image, thresh=thresh, vis=vis)
+    test_net(net, roidb, setType)
+
+
+

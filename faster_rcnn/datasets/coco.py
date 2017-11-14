@@ -4,9 +4,9 @@
 # Written by Ross Girshick
 # --------------------------------------------------------
 
-# from datasets.imdb import imdb
-# import datasets.ds_utils as ds_utils
-# from fast_rcnn.config import cfg
+from datasets.imdb import imdb
+import datasets.ds_utils as ds_utils
+from fast_rcnn.config import cfg
 import os.path as osp
 import sys
 import os
@@ -17,18 +17,9 @@ import cPickle
 import json
 import uuid
 # COCO API
-# TODO: add this part into this project
-from ..pycocotools.coco import COCO
-from ..pycocotools.cocoeval import COCOeval
-from ..pycocotools import mask as COCOmask
-
-from .imdb import imdb
-import ds_utils
-
-# TODO: make fast_rcnn irrelevant
-# >>>> obsolete, because it depends on sth outside of this project
-from ..fast_rcnn.config import cfg
-# <<<< obsolete
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
+from pycocotools import mask as COCOmask
 
 def _filter_crowd_proposals(roidb, crowd_thresh):
     """

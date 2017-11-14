@@ -5,29 +5,22 @@
 # Written by Ross Girshick
 # --------------------------------------------------------
 
-import xml.dom.minidom as minidom
-
+import pascal3d
 import os
 import PIL
+import imdb
+import xml.dom.minidom as minidom
 import numpy as np
 import scipy.sparse
-import subprocess
-import cPickle
-import math
-import glob
 import scipy.io as sio
-
-from .imdb import imdb
-from .imdb import ROOT_DIR
-
+import cPickle
+import subprocess
 from ..utils.cython_bbox import bbox_overlaps
 from ..utils.boxes_grid import get_boxes_grid
-
-# TODO: make fast_rcnn irrelevant
-# >>>> obsolete, because it depends on sth outside of this project
 from ..fast_rcnn.config import cfg
+import math
 from ..rpn_msr.generate_anchors import generate_anchors
-# <<<< obsolete
+import sys
 
 class pascal3d(imdb):
     def __init__(self, image_set, pascal3d_path = None):

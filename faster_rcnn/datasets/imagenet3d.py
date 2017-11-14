@@ -1,28 +1,24 @@
-import imagenet3d
+__author__ = 'yuxiang' # derived from honda.py by fyang
+
+import datasets
+import datasets.imagenet3d
 import os
 import PIL
+import datasets.imdb
 import numpy as np
 import scipy.sparse
+from utils.cython_bbox import bbox_overlaps
+from utils.boxes_grid import get_boxes_grid
 import subprocess
 import cPickle
+from fast_rcnn.config import cfg
 import math
+from rpn_msr.generate_anchors import generate_anchors
 import sys
 
-from .imdb import imdb
-from .imdb import ROOT_DIR
-from ..utils.cython_bbox import bbox_overlaps
-from ..utils.boxes_grid import get_boxes_grid
-
-# TODO: make fast_rcnn irrelevant
-# >>>> obsolete, because it depends on sth outside of this project
-from ..fast_rcnn.config import cfg
-from ..rpn_msr.generate_anchors import generate_anchors
-# <<<< obsolete
-
-
-class imagenet3d(imdb):
+class imagenet3d(datasets.imdb):
     def __init__(self, image_set, imagenet3d_path=None):
-        imdb.__init__(self, 'imagenet3d_' + image_set)
+        datasets.imdb.__init__(self, 'imagenet3d_' + image_set)
         self._image_set = image_set
         self._imagenet3d_path = self._get_default_path() if imagenet3d_path is None \
                             else imagenet3d_path
@@ -94,7 +90,7 @@ class imagenet3d(imdb):
         """
         Return the default path where imagenet3d is expected to be installed.
         """
-        return os.path.join(ROOT_DIR, 'data', 'ImageNet3D')
+        return os.path.join(datasets.ROOT_DIR, 'data', 'ImageNet3D')
 
 
     def gt_roidb(self):
@@ -316,7 +312,7 @@ class imagenet3d(imdb):
             model = cfg.REGION_PROPOSAL
             rpn_roidb = self._load_rpn_roidb(gt_roidb, model)
             print 'Region proposal network boxes loaded'
-            roidb = imdb.merge_roidbs(rpn_roidb, gt_roidb)
+            roidb = datasets.imdb.merge_roidbs(rpn_roidb, gt_roidb)
         else:
             print 'Loading region proposal network boxes...'
             model = cfg.REGION_PROPOSAL
@@ -473,6 +469,6 @@ class imagenet3d(imdb):
 
 
 if __name__ == '__main__':
-    d = imagenet3d('trainval')
+    d = datasets.imagenet3d('trainval')
     res = d.roidb
     from IPython import embed; embed()

@@ -1,32 +1,27 @@
+__author__ = 'yuxiang'
+
+import datasets
+import datasets.kitti_tracking
 import os
 import PIL
+import datasets.imdb
 import numpy as np
 import scipy.sparse
+from utils.cython_bbox import bbox_overlaps
+from utils.boxes_grid import get_boxes_grid
 import subprocess
 import cPickle
+from fast_rcnn.config import cfg
 import math
+from rpn_msr.generate_anchors import generate_anchors
 
-from .imdb import imdb
-from .imdb import ROOT_DIR
-
-from ..utils.cython_bbox import bbox_overlaps
-from ..utils.boxes_grid import get_boxes_grid
-
-# TODO: make fast_rcnn irrelevant
-# >>>> obsolete, because it depends on sth outside of this project
-from ..fast_rcnn.config import cfg
-from ..rpn_msr.generate_anchors import generate_anchors
-
-
-# <<<< obsolete
-
-class kitti_tracking(imdb):
+class kitti_tracking(datasets.imdb):
     def __init__(self, image_set, seq_name, kitti_tracking_path=None):
-        imdb.__init__(self, 'kitti_tracking_' + image_set + '_' + seq_name)
+        datasets.imdb.__init__(self, 'kitti_tracking_' + image_set + '_' + seq_name)
         self._image_set = image_set
         self._seq_name = seq_name
         self._kitti_tracking_path = self._get_default_path() if kitti_tracking_path is None \
-            else kitti_tracking_path
+                            else kitti_tracking_path
         self._data_path = os.path.join(self._kitti_tracking_path, image_set, 'image_02')
         self._classes = ('__background__', 'Car', 'Pedestrian', 'Cyclist')
         self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
@@ -50,7 +45,7 @@ class kitti_tracking(imdb):
         else:
             filename = os.path.join(self._kitti_tracking_path, 'voxel_exemplars', 'trainval', 'mapping.txt')
         assert os.path.exists(filename), 'Path does not exist: {}'.format(filename)
-
+        
         mapping = np.zeros(self._num_subclasses, dtype=np.int)
         with open(filename) as f:
             for line in f:
@@ -67,9 +62,9 @@ class kitti_tracking(imdb):
         self._num_boxes_proposal = 0
 
         assert os.path.exists(self._kitti_tracking_path), \
-            'kitti_tracking path does not exist: {}'.format(self._kitti_tracking_path)
+                'kitti_tracking path does not exist: {}'.format(self._kitti_tracking_path)
         assert os.path.exists(self._data_path), \
-            'Path does not exist: {}'.format(self._data_path)
+                'Path does not exist: {}'.format(self._data_path)
 
     def image_path_at(self, i):
         """
@@ -84,7 +79,7 @@ class kitti_tracking(imdb):
 
         image_path = os.path.join(self._data_path, index + self._image_ext)
         assert os.path.exists(image_path), \
-            'Path does not exist: {}'.format(image_path)
+                'Path does not exist: {}'.format(image_path)
         return image_path
 
     def _load_image_set_index(self):
@@ -132,7 +127,8 @@ class kitti_tracking(imdb):
         """
         Return the default path where kitti_tracking is expected to be installed.
         """
-        return os.path.join(ROOT_DIR, 'data', 'KITTI_Tracking')
+        return os.path.join(datasets.ROOT_DIR, 'data', 'KITTI_Tracking')
+
 
     def gt_roidb(self):
         """
@@ -154,14 +150,14 @@ class kitti_tracking(imdb):
             for i in xrange(1, self.num_classes):
                 print '{}: Total number of boxes {:d}'.format(self.classes[i], self._num_boxes_all[i])
                 print '{}: Number of boxes covered {:d}'.format(self.classes[i], self._num_boxes_covered[i])
-                print '{}: Recall {:f}'.format(self.classes[i],
-                                               float(self._num_boxes_covered[i]) / float(self._num_boxes_all[i]))
+                print '{}: Recall {:f}'.format(self.classes[i], float(self._num_boxes_covered[i]) / float(self._num_boxes_all[i]))
 
         with open(cache_file, 'wb') as fid:
             cPickle.dump(gt_roidb, fid, cPickle.HIGHEST_PROTOCOL)
         print 'wrote gt roidb to {}'.format(cache_file)
 
         return gt_roidb
+
 
     def _load_kitti_voxel_exemplar_annotation(self, index):
         """
@@ -198,13 +194,13 @@ class kitti_tracking(imdb):
             else:
                 lines = []
                 lines_flipped = []
-
+        
         num_objs = len(lines)
 
         # store information of flipped objects
         assert (num_objs == len(lines_flipped)), 'The number of flipped objects is not the same!'
         gt_subclasses_flipped = np.zeros((num_objs), dtype=np.int32)
-
+        
         for ix, line in enumerate(lines_flipped):
             words = line.split()
             subcls = int(words[1])
@@ -249,15 +245,14 @@ class kitti_tracking(imdb):
 
                 # compute overlap
                 overlaps_grid = bbox_overlaps(boxes_grid.astype(np.float), boxes_all.astype(np.float))
-
+        
                 # check how many gt boxes are covered by grids
                 if num_objs != 0:
                     index = np.tile(range(num_objs), len(cfg.TRAIN.SCALES))
-                    max_overlaps = overlaps_grid.max(axis=0)
+                    max_overlaps = overlaps_grid.max(axis = 0)
                     fg_inds = []
                     for k in xrange(1, self.num_classes):
-                        fg_inds.extend(
-                            np.where((gt_classes_all == k) & (max_overlaps >= cfg.TRAIN.FG_THRESH[k - 1]))[0])
+                        fg_inds.extend(np.where((gt_classes_all == k) & (max_overlaps >= cfg.TRAIN.FG_THRESH[k-1]))[0])
                     index_covered = np.unique(index[fg_inds])
 
                     for i in xrange(self.num_classes):
@@ -270,7 +265,7 @@ class kitti_tracking(imdb):
                 # faster rcnn region proposal
                 base_size = 16
                 ratios = [3.0, 2.0, 1.5, 1.0, 0.75, 0.5, 0.25]
-                scales = 2 ** np.arange(1, 6, 0.5)
+                scales = 2**np.arange(1, 6, 0.5)
                 anchors = generate_anchors(base_size, ratios, scales)
                 num_anchors = anchors.shape[0]
 
@@ -296,7 +291,7 @@ class kitti_tracking(imdb):
                 shift_y = np.arange(0, height) * feat_stride
                 shift_x, shift_y = np.meshgrid(shift_x, shift_y)
                 shifts = np.vstack((shift_x.ravel(), shift_y.ravel(),
-                                    shift_x.ravel(), shift_y.ravel())).transpose()
+                            shift_x.ravel(), shift_y.ravel())).transpose()
                 # add A anchors (1, A, 4) to
                 # cell K shifts (K, 1, 4) to get
                 # shift anchors (K, A, 4)
@@ -308,26 +303,27 @@ class kitti_tracking(imdb):
 
                 # compute overlap
                 overlaps_grid = bbox_overlaps(all_anchors.astype(np.float), gt_boxes.astype(np.float))
-
+        
                 # check how many gt boxes are covered by anchors
                 if num_objs != 0:
-                    max_overlaps = overlaps_grid.max(axis=0)
+                    max_overlaps = overlaps_grid.max(axis = 0)
                     fg_inds = []
                     for k in xrange(1, self.num_classes):
-                        fg_inds.extend(np.where((gt_classes == k) & (max_overlaps >= cfg.TRAIN.FG_THRESH[k - 1]))[0])
+                        fg_inds.extend(np.where((gt_classes == k) & (max_overlaps >= cfg.TRAIN.FG_THRESH[k-1]))[0])
 
                     for i in xrange(self.num_classes):
                         self._num_boxes_all[i] += len(np.where(gt_classes == i)[0])
                         self._num_boxes_covered[i] += len(np.where(gt_classes[fg_inds] == i)[0])
 
-        return {'boxes': boxes,
+        return {'boxes' : boxes,
                 'gt_classes': gt_classes,
                 'gt_subclasses': gt_subclasses,
                 'gt_subclasses_flipped': gt_subclasses_flipped,
                 'gt_overlaps': overlaps,
-                'gt_subindexes': subindexes,
-                'gt_subindexes_flipped': subindexes_flipped,
-                'flipped': False}
+                'gt_subindexes': subindexes, 
+                'gt_subindexes_flipped': subindexes_flipped, 
+                'flipped' : False}
+
 
     def region_proposal_roidb(self):
         """
@@ -355,7 +351,7 @@ class kitti_tracking(imdb):
                 model = cfg.REGION_PROPOSAL + '_train/'
             rpn_roidb = self._load_rpn_roidb(gt_roidb, model)
             print 'Region proposal network boxes loaded'
-            roidb = imdb.merge_roidbs(rpn_roidb, gt_roidb)
+            roidb = datasets.imdb.merge_roidbs(rpn_roidb, gt_roidb)
         else:
             print 'Loading region proposal network boxes...'
             model = cfg.REGION_PROPOSAL + '_trainval/'
@@ -370,14 +366,14 @@ class kitti_tracking(imdb):
 
         return roidb
 
+
     def _load_rpn_roidb(self, gt_roidb, model):
         # set the prefix
         prefix = model
 
         box_list = []
         for index in self.image_index:
-            filename = os.path.join(self._kitti_tracking_path, 'region_proposals', prefix, self._image_set,
-                                    index + '.txt')
+            filename = os.path.join(self._kitti_tracking_path, 'region_proposals',  prefix, self._image_set, index + '.txt')
             assert os.path.exists(filename), \
                 'RPN data not found at: {}'.format(filename)
             print filename
@@ -394,7 +390,7 @@ class kitti_tracking(imdb):
             y2 = raw_data[:, 3]
             score = raw_data[:, 4]
             inds = np.where((x2 > x1) & (y2 > y1))[0]
-            raw_data = raw_data[inds, :4]
+            raw_data = raw_data[inds,:4]
             self._num_boxes_proposal += raw_data.shape[0]
             box_list.append(raw_data)
 
@@ -432,8 +428,8 @@ class kitti_tracking(imdb):
                         cls_name = self.classes[self.subclass_mapping[subcls]]
                         assert (cls_name == cls), 'subclass not in class'
                         alpha = mapping[subcls]
-                        f.write('{:s} -1 -1 {:f} {:f} {:f} {:f} {:f} -1 -1 -1 -1 -1 -1 -1 {:.32f}\n'.format( \
-                            cls, alpha, dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3], dets[k, 4]))
+                        f.write('{:s} -1 -1 {:f} {:f} {:f} {:f} {:f} -1 -1 -1 -1 -1 -1 -1 {:.32f}\n'.format(\
+                                 cls, alpha, dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3], dets[k, 4]))
 
     # write detection results into one file
     def evaluate_detections_one_file(self, all_boxes, output_dir):
@@ -452,7 +448,7 @@ class kitti_tracking(imdb):
                 mapping[subcls] = float(words[3])
 
         # open results file
-        filename = os.path.join(output_dir, self._seq_name + '.txt')
+        filename = os.path.join(output_dir, self._seq_name+'.txt')
         print 'Writing all kitti_tracking results to file ' + filename
         with open(filename, 'wt') as f:
             # for each image
@@ -469,9 +465,8 @@ class kitti_tracking(imdb):
                         cls_name = self.classes[self.subclass_mapping[subcls]]
                         assert (cls_name == cls), 'subclass not in class'
                         alpha = mapping[subcls]
-                        f.write(
-                            '{:d} -1 {:s} -1 -1 {:f} {:f} {:f} {:f} {:f} -1 -1 -1 -1000 -1000 -1000 -10 {:f}\n'.format( \
-                                im_ind, cls, alpha, dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3], dets[k, 4]))
+                        f.write('{:d} -1 {:s} -1 -1 {:f} {:f} {:f} {:f} {:f} -1 -1 -1 -1000 -1000 -1000 -10 {:f}\n'.format(\
+                                 im_ind, cls, alpha, dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3], dets[k, 4]))
 
     def evaluate_proposals(self, all_boxes, output_dir):
         # for each image
@@ -487,8 +482,8 @@ class kitti_tracking(imdb):
                     if dets == []:
                         continue
                     for k in xrange(dets.shape[0]):
-                        f.write('{:f} {:f} {:f} {:f} {:.32f}\n'.format( \
-                            dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3], dets[k, 4]))
+                        f.write('{:f} {:f} {:f} {:f} {:.32f}\n'.format(\
+                                 dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3], dets[k, 4]))
 
     def evaluate_proposals_msr(self, all_boxes, output_dir):
         # for each image
@@ -500,13 +495,10 @@ class kitti_tracking(imdb):
                 if dets == []:
                     continue
                 for k in xrange(dets.shape[0]):
-                    f.write('{:f} {:f} {:f} {:f} {:.32f}\n'.format(dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3],
-                                                                   dets[k, 4]))
+                    f.write('{:f} {:f} {:f} {:f} {:.32f}\n'.format(dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3], dets[k, 4]))
 
 
 if __name__ == '__main__':
-    d = kitti_tracking('training', '0000')
+    d = datasets.kitti_tracking('training', '0000')
     res = d.roidb
-    from IPython import embed;
-
-    embed()
+    from IPython import embed; embed()

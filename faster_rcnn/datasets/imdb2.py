@@ -8,16 +8,11 @@
 import os
 import os.path as osp
 import PIL
+from utils.cython_bbox import bbox_overlaps
 import numpy as np
 import scipy.sparse
-
-from . import ROOT_DIR
-from ..utils.cython_bbox import bbox_overlaps
-
-# TODO: make fast_rcnn irrelevant
-# >>>> obsolete, because it depends on sth outside of this project
-from ..fast_rcnn.config import cfg
-# <<<< obsolete
+import datasets
+from fast_rcnn.config import cfg
 
 class imdb(object):
     """Image database."""
@@ -81,7 +76,7 @@ class imdb(object):
 
     @property
     def cache_path(self):
-        cache_path = osp.abspath(osp.join(ROOT_DIR, 'data', 'cache'))
+        cache_path = osp.abspath(osp.join(datasets.ROOT_DIR, 'data', 'cache'))
         if not os.path.exists(cache_path):
             os.makedirs(cache_path)
         return cache_path

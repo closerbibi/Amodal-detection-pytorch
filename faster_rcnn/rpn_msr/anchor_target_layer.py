@@ -1,4 +1,4 @@
-# --------------------------------------------------------
+# pdb.set_trace()
 # Faster R-CNN
 # Copyright (c) 2015 Microsoft
 # Licensed under The MIT License [see LICENSE for details]
@@ -12,7 +12,7 @@ import numpy.random as npr
 
 from .generate_anchors import generate_anchors
 from ..utils.cython_bbox import bbox_overlaps, bbox_intersections
-
+import pdb
 # TODO: make fast_rcnn irrelevant
 # >>>> obsolete, because it depends on sth outside of this project
 from ..fast_rcnn.config import cfg
@@ -147,7 +147,7 @@ def anchor_target_layer(rpn_cls_score, gt_boxes, gt_ishard, dontcare_areas, im_i
     gt_max_overlaps = overlaps[gt_argmax_overlaps,
                                np.arange(overlaps.shape[1])]
     gt_argmax_overlaps = np.where(overlaps == gt_max_overlaps)[0]
-
+    #pdb.set_trace()
     if not cfg.TRAIN.RPN_CLOBBER_POSITIVES:
         # assign bg labels first so that positive labels can clobber them
         labels[max_overlaps < cfg.TRAIN.RPN_NEGATIVE_OVERLAP] = 0

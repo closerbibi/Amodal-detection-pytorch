@@ -1,28 +1,23 @@
+__author__ = 'yuxiang' # derived from honda.py by fyang
+
+import datasets
+import datasets.kitti
 import os
 import PIL
+import datasets.imdb
 import numpy as np
 import scipy.sparse
+from utils.cython_bbox import bbox_overlaps
+from utils.boxes_grid import get_boxes_grid
 import subprocess
 import cPickle
+from fast_rcnn.config import cfg
 import math
-import glob
+from rpn_msr.generate_anchors import generate_anchors
 
-from .imdb import imdb
-from .imdb import ROOT_DIR
-
-from ..utils.cython_bbox import bbox_overlaps
-from ..utils.boxes_grid import get_boxes_grid
-
-# TODO: make fast_rcnn irrelevant
-# >>>> obsolete, because it depends on sth outside of this project
-from ..fast_rcnn.config import cfg
-from ..rpn_msr.generate_anchors import generate_anchors
-# <<<< obsolete
-
-class kitti(imdb):
+class kitti(datasets.imdb):
     def __init__(self, image_set, kitti_path=None):
-
-        imdb.__init__(self, 'kitti_' + image_set)
+        datasets.imdb.__init__(self, 'kitti_' + image_set)
         self._image_set = image_set
         self._kitti_path = self._get_default_path() if kitti_path is None \
                             else kitti_path
@@ -30,7 +25,7 @@ class kitti(imdb):
         self._classes = ('__background__', 'Car', 'Pedestrian', 'Cyclist')
         self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
         self._image_ext = '.png'
-        self._image_index = self._load_image_set_index_new()
+        self._image_index = self._load_image_set_index()
         # Default to roidb handler
         if cfg.IS_RPN:
             self._roidb_handler = self.gt_roidb
@@ -44,6 +39,18 @@ class kitti(imdb):
         else:
             self._num_subclasses = 227 + 36 + 36 + 1
             prefix = 'test'
+
+        # load the mapping for subcalss to class
+        filename = os.path.join(self._kitti_path, cfg.SUBCLS_NAME, prefix, 'mapping.txt')
+        assert os.path.exists(filename), 'Path does not exist: {}'.format(filename)
+        
+        mapping = np.zeros(self._num_subclasses, dtype=np.int)
+        with open(filename) as f:
+            for line in f:
+                words = line.split()
+                subcls = int(words[0])
+                mapping[subcls] = self._class_to_ind[words[1]]
+        self._subclass_mapping = mapping
 
         self.config = {'top_k': 100000}
 
@@ -80,7 +87,6 @@ class kitti(imdb):
 
     def _load_image_set_index(self):
         """
-        obsolete, using _load_image_set_index_new instead
         Load the indexes listed in this dataset's image set file.
         """
         image_set_file = os.path.join(self._kitti_path, self._image_set + '.txt')
@@ -91,25 +97,11 @@ class kitti(imdb):
             image_index = [x.rstrip('\n') for x in f.readlines()]
         return image_index
 
-    def _load_image_set_index_new(self):
-        """
-        Load the indexes listed in this dataset's image set file.
-        """
-        image_set_file = os.path.join(self._kitti_path, 'training/image_2/')
-        assert os.path.exists(image_set_file), \
-                'Path does not exist: {}'.format(image_set_file)
-
-        image_index = os.listdir(image_set_file)
-        image_set_file = image_set_file + '*.png'
-        image_index = glob.glob(image_set_file)
-
-        return image_index
-
     def _get_default_path(self):
         """
         Return the default path where KITTI is expected to be installed.
         """
-        return os.path.join(cfg.DATA_DIR, 'KITTI')
+        return os.path.join(datasets.ROOT_DIR, 'data', 'KITTI')
 
 
     def gt_roidb(self):
@@ -462,7 +454,7 @@ class kitti(imdb):
                 model = cfg.REGION_PROPOSAL + '_125/'
             rpn_roidb = self._load_rpn_roidb(gt_roidb, model)
             print 'Region proposal network boxes loaded'
-            roidb = imdb.merge_roidbs(rpn_roidb, gt_roidb)
+            roidb = datasets.imdb.merge_roidbs(rpn_roidb, gt_roidb)
 
             # print 'Loading voxel pattern boxes...'
             # if self._image_set == 'trainval':
@@ -471,7 +463,7 @@ class kitti(imdb):
             #    model = '3DVP_125/'
             # vp_roidb = self._load_voxel_pattern_roidb(gt_roidb, model)
             # print 'Voxel pattern boxes loaded'
-            # roidb = imdb.merge_roidbs(vp_roidb, gt_roidb)
+            # roidb = datasets.imdb.merge_roidbs(vp_roidb, gt_roidb)
 
             # print 'Loading selective search boxes...'
             # ss_roidb = self._load_selective_search_roidb(gt_roidb)
@@ -481,8 +473,8 @@ class kitti(imdb):
             # acf_roidb = self._load_acf_roidb(gt_roidb)
             # print 'ACF boxes loaded'
 
-            # roidb = imdb.merge_roidbs(ss_roidb, gt_roidb)
-            # roidb = imdb.merge_roidbs(roidb, acf_roidb)
+            # roidb = datasets.imdb.merge_roidbs(ss_roidb, gt_roidb)
+            # roidb = datasets.imdb.merge_roidbs(roidb, acf_roidb)
         else:
             print 'Loading region proposal network boxes...'
             model = cfg.REGION_PROPOSAL + '_227/'
@@ -502,7 +494,7 @@ class kitti(imdb):
             # acf_roidb = self._load_acf_roidb(None)
             # print 'ACF boxes loaded'
 
-            # roidb = imdb.merge_roidbs(roidb, acf_roidb)
+            # roidb = datasets.imdb.merge_roidbs(roidb, acf_roidb)
         print '{} region proposals per image'.format(self._num_boxes_proposal / len(self.image_index))
 
         with open(cache_file, 'wb') as fid:
@@ -725,6 +717,6 @@ class kitti(imdb):
 
 
 if __name__ == '__main__':
-    d = kitti('train')
+    d = datasets.kitti('train')
     res = d.roidb
     from IPython import embed; embed()

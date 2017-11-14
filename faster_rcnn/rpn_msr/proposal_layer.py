@@ -15,7 +15,7 @@ from .generate_anchors import generate_anchors
 from ..fast_rcnn.config import cfg
 from ..fast_rcnn.bbox_transform import bbox_transform_inv, clip_boxes
 from ..fast_rcnn.nms_wrapper import nms
-
+import pdb
 # <<<< obsolete
 
 
@@ -151,7 +151,7 @@ def proposal_layer(rpn_cls_prob_reshape, rpn_bbox_pred, im_info, cfg_key, _feat_
         order = order[:pre_nms_topN]
     proposals = proposals[order, :]
     scores = scores[order]
-
+    #pdb.set_trace()
     # 6. apply nms (e.g. threshold = 0.7)
     # 7. take after_nms_topN (e.g. 300)
     # 8. return the top proposals (-> RoIs top)
